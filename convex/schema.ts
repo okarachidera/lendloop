@@ -48,6 +48,7 @@ export default defineSchema({
       v.literal("request_created"),
       v.literal("request_approved"),
       v.literal("request_declined"),
+      v.literal("request_cancelled"),
       v.literal("loan_returned"),
       v.literal("loan_overdue")
     ),
@@ -61,10 +62,12 @@ export default defineSchema({
     }),
     status: v.union(
       v.literal("pending"),
+      v.literal("claimed"),
       v.literal("delivered"),
       v.literal("failed")
     ),
     attemptCount: v.number(),
+    nextAttemptAt: v.optional(v.number()),
     lastAttemptAt: v.optional(v.number()),
     createdAt: v.number(),
   })
@@ -86,9 +89,12 @@ export default defineSchema({
     period: v.string(),
     status: v.union(
       v.literal("pending"),
+      v.literal("claimed"),
       v.literal("delivered"),
       v.literal("failed")
     ),
+    attemptId: v.optional(v.string()),
+    nextAttemptAt: v.optional(v.number()),
     attemptCount: v.number(),
     lastAttemptAt: v.optional(v.number()),
     createdAt: v.number(),

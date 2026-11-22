@@ -2,7 +2,11 @@
   "name": "LendLoop Daily Overdue Reminders",
   "nodes": [
     {
-      "parameters": { "rule": { "interval": [{"field": "hours", "hoursInterval": 24}] } },
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "hours", "hoursInterval": 24}]
+        }
+      },
       "id": "daily-trigger",
       "name": "Daily UTC Schedule",
       "type": "n8n-nodes-base.scheduleTrigger",
@@ -14,19 +18,30 @@
         "method": "GET",
         "url": "={{ $env.CONVEX_HTTP_BASE_URL + '/n8n/overdue' }}",
         "sendHeaders": true,
-        "headerParameters": { "parameters": [{"name": "Authorization", "value": "=Bearer {{ $env.LENDLOOP_N8N_SECRET }}"}] },
-        "options": {}
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "=Bearer {{ $env.LENDLOOP_N8N_SECRET }}"}
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "retry": {
+            "maxTries": 3,
+            "waitBetweenTries": 1000
+          }
+        }
       },
       "id": "fetch-overdue",
-      "name": "Fetch Overdue Loans",
+      "name": "Fetch and Claim Overdue Loans",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [500, 300]
+      "position": [500, 300],
+      "continueOnFail": true
     },
     {
       "parameters": {
         "language": "javaScript",
-        "jsCode": "const reminders = $json.reminders || [];\nfor (const item of reminders) console.log(`[LendLoop reminder] Borrower ${item.borrowerId}: ${item.toolName} overdue since ${item.endDate}`);\nreturn reminders.map(item => ({ json: { ...item, success: true } }));"
+        "jsCode": "if ($json.error) throw new Error(`Overdue endpoint failed: ${$json.error}`);\nconst reminders = $json.reminders || [];\nfor (const item of reminders) console.log(`[LendLoop reminder] Borrower ${item.borrowerId}: ${item.toolName} overdue since ${item.endDate}`);\nreturn reminders.map(item => ({ json: { ...item, success: true } }));"
       },
       "id": "send-reminders",
       "name": "Send Mock Reminders",
@@ -39,26 +54,71 @@
         "method": "POST",
         "url": "={{ $env.CONVEX_HTTP_BASE_URL + '/n8n/reminder-delivery' }}",
         "sendHeaders": true,
-        "headerParameters": { "parameters": [{"name": "Authorization", "value": "=Bearer {{ $env.LENDLOOP_N8N_SECRET }}"},{"name": "Content-Type", "value": "application/json"}] },
+        "headerParameters": {
+          "parameters": [
+            {"name": "Authorization", "value": "=Bearer {{ $env.LENDLOOP_N8N_SECRET }}"},
+            {"name": "Content-Type", "value": "application/json"}
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ loanId: $json.loanId, period: $json.period, success: $json.success }) }}",
-        "options": {}
+        "jsonBody": "={{ JSON.stringify({ loanId: $json.loanId, period: $json.period, attemptId: $json.attemptId, success: $json.success }) }}",
+        "options": {
+          "timeout": 10000,
+          "retry": {
+            "maxTries": 3,
+            "waitBetweenTries": 1000
+          }
+        }
       },
       "id": "write-status",
-      "name": "Write Delivery Status",
+      "name": "Write Idempotent Delivery Status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1020, 300]
+      "position": [1020, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {},
+      "id": "reminder-error-trigger",
+      "name": "Reminder Workflow Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [240, 520]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const error = $json.error?.message || 'Unknown overdue reminder workflow error';\nconsole.error(`[LendLoop reminder failure] ${error}`);\nreturn [{ json: { recorded: false, error } }];"
+      },
+      "id": "reminder-error-log",
+      "name": "Log Reminder Workflow Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 520]
     }
   ],
   "connections": {
-    "Daily UTC Schedule": { "main": [[{"node": "Fetch Overdue Loans", "type": "main", "index": 0}]] },
-    "Fetch Overdue Loans": { "main": [[{"node": "Send Mock Reminders", "type": "main", "index": 0}]] },
-    "Send Mock Reminders": { "main": [[{"node": "Write Delivery Status", "type": "main", "index": 0}]] }
+    "Daily UTC Schedule": {
+      "main": [[{"node": "Fetch and Claim Overdue Loans", "type": "main", "index": 0}]]
+    },
+    "Fetch and Claim Overdue Loans": {
+      "main": [[{"node": "Send Mock Reminders", "type": "main", "index": 0}]]
+    },
+    "Send Mock Reminders": {
+      "main": [[{"node": "Write Idempotent Delivery Status", "type": "main", "index": 0}]]
+    },
+    "Reminder Workflow Error": {
+      "main": [[{"node": "Log Reminder Workflow Error", "type": "main", "index": 0}]]
+    }
   },
   "active": false,
-  "settings": { "executionOrder": "v1", "timezone": "UTC" },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  },
   "pinData": {},
   "tags": []
 }

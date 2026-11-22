@@ -55,6 +55,7 @@ Date ranges use inclusive UTC `YYYY-MM-DD` values. Start must be today or later 
    ```
 
    Copy the deployment URL into `NEXT_PUBLIC_CONVEX_URL`.
+   Set `CLERK_JWT_ISSUER_DOMAIN` in `.env.local` and in the Convex deployment.
 4. Copy `.env.example` to `.env.local` and populate Clerk values.
 5. Set Convex environment secrets:
 
@@ -73,6 +74,7 @@ Date ranges use inclusive UTC `YYYY-MM-DD` values. Start must be today or later 
 ## Convex / Clerk setup
 
 In Clerk, create a JWT template named `convex` with a claim containing the Clerk subject in the standard Convex-compatible format. Configure the Convex provider in the Clerk dashboard using the Clerk issuer domain and JWT template. Convex mutations call `ctx.auth.getUserIdentity()` and reject unauthenticated or uninitialized users.
+`convex/auth.config.ts` is the deployment-side provider configuration: it uses `CLERK_JWT_ISSUER_DOMAIN` and application ID `convex`. Set the same issuer domain in Convex and use the matching JWT template name in `NEXT_PUBLIC_CLERK_CONVEX_JWT_TEMPLATE`.
 
 The first signed-in request creates a `users` row with role `user`. Admin role changes must be performed in Convex with a trusted server process or a reviewed migration; no browser mutation accepts a role.
 

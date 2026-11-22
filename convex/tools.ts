@@ -1,6 +1,7 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { getAuthenticatedUser, requireAdmin } from "./auth";
+import { internal } from "./_generated/api";
 
 export const publicList = queryGeneric({
   args: { category: v.optional(v.string()) },
@@ -13,12 +14,10 @@ export const publicList = queryGeneric({
       : await ctx.db.query("tools").collect();
     return listed
       .filter((tool) => tool.status === "available")
-      .map(({ name, category, condition, _id }) => ({
+      .map(({ name, category, _id }) => ({
         _id,
         name,
         category,
-        condition,
-        status: "available" as const,
       }));
   },
 });
@@ -32,9 +31,6 @@ export const getPublic = queryGeneric({
       _id: tool._id,
       name: tool.name,
       category: tool.category,
-      condition: tool.condition,
-      description: tool.description,
-      status: tool.status,
     };
   },
 });
@@ -114,6 +110,35 @@ export const remove = mutationGeneric({
       .withIndex("by_tool_status", (q: any) => q.eq("toolId", args.id).eq("status", "approved"))
       .unique();
     if (active) throw new Error("Cannot delete a listing with an active loan");
+    const pending = await ctx.db
+      .query("loanRequests")
+      .withIndex("by_tool_status", (q: any) =>
+        q.eq("toolId", args.id).eq("status", "pending")
+      )
+      .collect();
+    for (const loan of pending) {
+      await ctx.db.patch(loan._id, {
+        status: "cancelled",
+        updatedAt: Date.now(),
+      });
+      await ctx.db.insert("notificationEvents", {
+        eventId: crypto.randomUUID(),
+        type: "request_cancelled",
+        loanId: loan._id,
+        recipientId: loan.borrowerId,
+        payload: {
+          toolName: tool.name,
+          startDate: loan.startDate,
+          endDate: loan.endDate,
+          status: "cancelled",
+        },
+        status: "pending",
+        attemptCount: 0,
+        nextAttemptAt: Date.now(),
+        createdAt: Date.now(),
+      });
+      await ctx.scheduler.runAfter(0, internal.automation.dispatchPendingEvents, {});
+    }
     await ctx.db.delete(args.id);
   },
 });

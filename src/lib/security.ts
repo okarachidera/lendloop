@@ -7,6 +7,15 @@ export function verifyTimestamp(timestamp: string, nowMs = Date.now(), tolerance
   return Number.isFinite(parsed) && Math.abs(nowMs - parsed) <= toleranceMs;
 }
 
+export function notificationBackoffMs(attemptCount: number) {
+  if (attemptCount <= 0) return 30_000;
+  return Math.min(60 * 60 * 1000, 30_000 * 2 ** (attemptCount - 1));
+}
+
+export function reminderClaimExpired(claimedAt: number, nowMs = Date.now(), leaseMs = 15 * 60 * 1000) {
+  return nowMs - claimedAt >= leaseMs;
+}
+
 export function rangesOverlap(
   startA: string,
   endA: string,

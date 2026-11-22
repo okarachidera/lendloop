@@ -5,6 +5,8 @@ import { ConvexProviderWithAuth, ConvexReactClient } from "convex/react";
 import type { ReactNode } from "react";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+const convexJwtTemplate =
+  process.env.NEXT_PUBLIC_CLERK_CONVEX_JWT_TEMPLATE || "convex";
 const convex = convexUrl ? new ConvexReactClient(convexUrl) : null;
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -26,6 +28,6 @@ function useConvexAuth() {
   return {
     isLoading: !isLoaded,
     isAuthenticated: Boolean(isSignedIn),
-    fetchAccessToken: async () => getToken({ template: "convex" }),
+    fetchAccessToken: async () => getToken({ template: convexJwtTemplate }),
   };
 }
