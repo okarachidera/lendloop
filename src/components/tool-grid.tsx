@@ -45,7 +45,6 @@ export function ToolGrid({
             <span className="h-2 w-2 rounded-full bg-emerald-500" title="Available" />
           </div>
           <h3 className="text-lg font-bold text-slate-950">{tool.name}</h3>
-          <p className="mt-1 text-sm text-slate-500">Condition: {tool.condition}</p>
         </Link>
       ))}
     </div>

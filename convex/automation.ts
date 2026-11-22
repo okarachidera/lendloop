@@ -19,6 +19,10 @@ export const dispatchPendingEvents = actionGeneric({
 
     const pending = await ctx.runQuery(internal.automation.pendingEvents, {});
     for (const event of pending) {
+      const claimed = await ctx.runMutation(internal.automation.claimNotificationEvent, {
+        eventId: event.eventId,
+      });
+      if (!claimed) continue;
       const timestamp = String(Date.now());
       const canonical = JSON.stringify({
         eventId: event.eventId,
@@ -73,11 +77,48 @@ export const dispatchPendingEvents = actionGeneric({
 export const pendingEvents = internalQueryGeneric({
   args: {},
   handler: async (ctx) => {
-    const events = await ctx.db
+    const pending = await ctx.db
       .query("notificationEvents")
       .withIndex("by_status", (q: any) => q.eq("status", "pending"))
       .collect();
-    return events.filter((event) => event.attemptCount < 5).slice(0, 20);
+    const claimed = await ctx.db
+      .query("notificationEvents")
+      .withIndex("by_status", (q: any) => q.eq("status", "claimed"))
+      .collect();
+    const now = Date.now();
+    return [...pending, ...claimed]
+      .filter(
+        (event) =>
+          event.attemptCount < 5 &&
+          (!event.nextAttemptAt || event.nextAttemptAt <= now)
+      )
+      .slice(0, 20);
+  },
+});
+
+export const claimNotificationEvent = internalMutationGeneric({
+  args: { eventId: v.string() },
+  handler: async (ctx, args) => {
+    const event = await ctx.db
+      .query("notificationEvents")
+      .withIndex("by_event_id", (q: any) => q.eq("eventId", args.eventId))
+      .unique();
+    if (!event) return false;
+    if (event.status === "delivered" || event.status === "failed") return false;
+    const now = Date.now();
+    if (
+      event.status === "claimed" &&
+      event.nextAttemptAt &&
+      event.nextAttemptAt > now
+    ) {
+      return false;
+    }
+    await ctx.db.patch(event._id, {
+      status: "claimed",
+      nextAttemptAt: now + 5 * 60 * 1000,
+      lastAttemptAt: now,
+    });
+    return true;
   },
 });
 
@@ -89,11 +130,40 @@ export const recordEventResult = internalMutationGeneric({
       .withIndex("by_event_id", (q: any) => q.eq("eventId", args.eventId))
       .unique();
     if (!event) return;
+    if (event.status === "delivered" || event.status === "failed") return;
+    const now = Date.now();
+    if (args.success) {
+      await ctx.db.patch(event._id, {
+        status: "delivered",
+        attemptCount: event.attemptCount + 1,
+        lastAttemptAt: now,
+      });
+      return;
+    }
+    const attemptCount = event.attemptCount + 1;
+    if (attemptCount >= 5) {
+      await ctx.db.patch(event._id, {
+        status: "failed",
+        attemptCount,
+        lastAttemptAt: now,
+      });
+      return;
+    }
+    const backoffMs = Math.min(
+      60 * 60 * 1000,
+      30 * 1000 * 2 ** (attemptCount - 1)
+    );
     await ctx.db.patch(event._id, {
-      status: args.success ? "delivered" : "failed",
-      attemptCount: event.attemptCount + 1,
-      lastAttemptAt: Date.now(),
+      status: "pending",
+      attemptCount,
+      nextAttemptAt: now + backoffMs,
+      lastAttemptAt: now,
     });
+    await ctx.scheduler.runAfter(
+      backoffMs,
+      internal.automation.dispatchPendingEvents,
+      {}
+    );
   },
 });
 
@@ -109,13 +179,6 @@ export const overdueLoans = internalQueryGeneric({
     const overdue = approved.filter((loan) => loan.endDate < today);
     const results = [];
     for (const loan of overdue) {
-      const existing = await ctx.db
-        .query("reminderDeliveries")
-        .withIndex("by_loan_period", (q: any) =>
-          q.eq("loanId", loan._id).eq("period", period)
-        )
-        .unique();
-      if (existing) continue;
       const borrower = await ctx.db.get(loan.borrowerId);
       const tool = await ctx.db.get(loan.toolId);
       if (!borrower || !tool) continue;
@@ -131,7 +194,7 @@ export const overdueLoans = internalQueryGeneric({
   },
 });
 
-export const createReminder = internalMutationGeneric({
+export const claimReminder = internalMutationGeneric({
   args: {
     loanId: v.id("loanRequests"),
     borrowerId: v.id("users"),
@@ -144,13 +207,64 @@ export const createReminder = internalMutationGeneric({
         q.eq("loanId", args.loanId).eq("period", args.period)
       )
       .unique();
-    if (existing) return existing._id;
-    return await ctx.db.insert("reminderDeliveries", {
+    const now = Date.now();
+    if (existing) {
+      if (existing.status === "delivered") return null;
+      if (existing.status === "failed" && existing.attemptCount >= 5) return null;
+      if (
+        existing.status === "claimed" &&
+        existing.nextAttemptAt &&
+        existing.nextAttemptAt > now
+      ) {
+        return null;
+      }
+      if (
+        existing.status === "pending" &&
+        existing.nextAttemptAt &&
+        existing.nextAttemptAt > now
+      ) {
+        return null;
+      }
+      const attemptId = crypto.randomUUID();
+      await ctx.db.patch(existing._id, {
+        status: "claimed",
+        attemptId,
+        nextAttemptAt: now + 15 * 60 * 1000,
+        lastAttemptAt: now,
+      });
+      const loan = await ctx.db.get(existing.loanId);
+      const tool = loan ? await ctx.db.get(loan.toolId) : null;
+      return {
+        loanId: existing.loanId,
+        borrowerId: existing.borrowerId,
+        toolName: tool?.name,
+        endDate: loan?.endDate,
+        period: existing.period,
+        attemptId,
+      };
+    }
+    const attemptId = crypto.randomUUID();
+    await ctx.db.insert("reminderDeliveries", {
       ...args,
-      status: "pending",
+      status: "claimed",
+      attemptId,
       attemptCount: 0,
-      createdAt: Date.now(),
+      nextAttemptAt: now + 15 * 60 * 1000,
+      lastAttemptAt: now,
+      createdAt: now,
     });
+    const loan = await ctx.db.get(args.loanId);
+    const tool = loan ? await ctx.db.get(loan.toolId) : null;
+    return loan
+      ? {
+          loanId: args.loanId,
+          borrowerId: args.borrowerId,
+          toolName: tool?.name,
+          endDate: loan.endDate,
+          period: args.period,
+          attemptId,
+        }
+      : null;
   },
 });
 
@@ -158,6 +272,7 @@ export const recordReminder = internalMutationGeneric({
   args: {
     loanId: v.id("loanRequests"),
     period: v.string(),
+    attemptId: v.string(),
     success: v.boolean(),
   },
   handler: async (ctx, args) => {
@@ -167,11 +282,38 @@ export const recordReminder = internalMutationGeneric({
         q.eq("loanId", args.loanId).eq("period", args.period)
       )
       .unique();
-    if (!delivery) return;
+    if (!delivery || delivery.attemptId !== args.attemptId) return { idempotent: true };
+    if (delivery.status === "delivered") return { idempotent: true };
+    const now = Date.now();
+    if (args.success) {
+      await ctx.db.patch(delivery._id, {
+        status: "delivered",
+        lastAttemptAt: now,
+        nextAttemptAt: undefined,
+      });
+      return { idempotent: true };
+    }
+    const attemptCount = delivery.attemptCount + 1;
+    if (attemptCount >= 5) {
+      await ctx.db.patch(delivery._id, {
+        status: "failed",
+        attemptCount,
+        lastAttemptAt: now,
+        nextAttemptAt: undefined,
+      });
+      return { idempotent: true };
+    }
+    const backoffMs = Math.min(
+      60 * 60 * 1000,
+      30 * 1000 * 2 ** (attemptCount - 1)
+    );
     await ctx.db.patch(delivery._id, {
-      status: args.success ? "delivered" : "failed",
-      attemptCount: delivery.attemptCount + 1,
-      lastAttemptAt: Date.now(),
+      status: "pending",
+      attemptCount,
+      nextAttemptAt: now + backoffMs,
+      lastAttemptAt: now,
+      attemptId: undefined,
     });
+    return { idempotent: true };
   },
 });

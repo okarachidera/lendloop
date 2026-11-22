@@ -41,10 +41,9 @@ export default function ToolDetailPage() {
       <div>
         <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-bold text-emerald-700">{tool.category}</span>
         <h1 className="mt-5 text-4xl font-bold">{tool.name}</h1>
-        <p className="mt-3 text-slate-600">{tool.description}</p>
         <div className="mt-8 grid grid-cols-2 gap-3">
-          <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs font-bold uppercase text-slate-500">Condition</p><p className="mt-1 font-semibold">{tool.condition}</p></div>
-          <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs font-bold uppercase text-slate-500">Availability</p><p className="mt-1 font-semibold text-emerald-700">Available</p></div>
+          <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs font-bold uppercase text-slate-500">Category</p><p className="mt-1 font-semibold">{tool.category}</p></div>
+          <div className="rounded-xl border border-slate-200 bg-white p-4"><p className="text-xs font-bold uppercase text-slate-500">Listing</p><p className="mt-1 font-semibold text-emerald-700">Available</p></div>
         </div>
       </div>
       <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

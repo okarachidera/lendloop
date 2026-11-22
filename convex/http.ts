@@ -27,15 +27,17 @@ http.route({
       return new Response("Unauthorized", { status: 401 });
     }
     const overdue = await ctx.runQuery(internal.automation.overdueLoans, {});
+    const reminders = [];
     for (const loan of overdue) {
-      await ctx.runMutation(internal.automation.createReminder, {
+      const claimed = await ctx.runMutation(internal.automation.claimReminder, {
         loanId: loan.loanId,
         borrowerId: loan.borrowerId,
         period: loan.period,
       });
+      if (claimed) reminders.push(claimed);
     }
     return Response.json({
-      reminders: overdue,
+      reminders,
       generatedAt: new Date().toISOString(),
     });
   }),
@@ -52,6 +54,7 @@ http.route({
     if (
       typeof body.loanId !== "string" ||
       typeof body.period !== "string" ||
+      typeof body.attemptId !== "string" ||
       typeof body.success !== "boolean"
     ) {
       return new Response("Invalid payload", { status: 400 });
@@ -59,6 +62,7 @@ http.route({
     await ctx.runMutation(internal.automation.recordReminder, {
       loanId: body.loanId,
       period: body.period,
+      attemptId: body.attemptId,
       success: body.success,
     });
     return Response.json({ recorded: true });

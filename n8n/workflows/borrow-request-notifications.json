@@ -20,10 +20,10 @@
     {
       "parameters": {
         "language": "javaScript",
-        "jsCode": "const secret = $env.N8N_WEBHOOK_SECRET;\nconst timestamp = $headers['x-lendloop-timestamp'];\nconst eventId = $headers['x-lendloop-event-id'];\nconst signature = String($headers['x-lendloop-signature'] || '').replace('sha256=', '');\nconst crypto = require('crypto');\nconst rawBody = typeof $rawBody === 'string' ? $rawBody : JSON.stringify($json);\nif (!timestamp || !eventId || !secret) throw new Error('Missing signed webhook fields');\nif (Math.abs(Date.now() - Number(timestamp)) > 300000) throw new Error('Replay-protected timestamp rejected');\nconst expected = crypto.createHmac('sha256', secret).update(timestamp + '.' + rawBody).digest('hex');\nif (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) throw new Error('Invalid HMAC signature');\nreturn [{ json: $json }];"
+        "jsCode": "const secret = $env.N8N_WEBHOOK_SECRET;\nconst timestamp = $headers['x-lendloop-timestamp'];\nconst eventId = $headers['x-lendloop-event-id'];\nconst signature = String($headers['x-lendloop-signature'] || '').replace(/^sha256=/, '');\nconst crypto = require('crypto');\nconst item = $input.first();\nconst rawBody = item.binary?.data?.data\n  ? Buffer.from(item.binary.data.data, 'base64').toString('utf8')\n  : JSON.stringify(item.json);\nif (!timestamp || !eventId || !secret) throw new Error('Missing signed webhook fields');\nif (!/^\\d+$/.test(timestamp) || Math.abs(Date.now() - Number(timestamp)) > 300000) throw new Error('Replay-protected timestamp rejected');\nconst expected = crypto.createHmac('sha256', secret).update(timestamp + '.' + rawBody).digest('hex');\nif (!/^([a-f0-9]{64})$/i.test(signature)) throw new Error('Invalid HMAC signature format');\nif (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) throw new Error('Invalid HMAC signature');\nconst staticData = $getWorkflowStaticData('global');\nstaticData.seenEvents ||= {};\nconst now = Date.now();\nfor (const key of Object.keys(staticData.seenEvents)) {\n  if (now - staticData.seenEvents[key] > 600000) delete staticData.seenEvents[key];\n}\nif (staticData.seenEvents[eventId]) throw new Error('Duplicate event rejected');\nstaticData.seenEvents[eventId] = now;\nreturn [{ json: item.json }];"
       },
       "id": "verify-signature",
-      "name": "Verify HMAC",
+      "name": "Verify HMAC and Replay",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [500, 300]
@@ -38,14 +38,45 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [760, 300]
+    },
+    {
+      "parameters": {},
+      "id": "borrow-error-trigger",
+      "name": "Borrow Workflow Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [240, 520]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const error = $json.error?.message || 'Unknown borrow notification workflow error';\nconsole.error(`[LendLoop borrow notification failure] ${error}`);\nreturn [{ json: { recorded: false, error } }];"
+      },
+      "id": "borrow-error-log",
+      "name": "Log Borrow Workflow Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 520]
     }
   ],
   "connections": {
-    "Convex Signed Webhook": { "main": [[{"node": "Verify HMAC", "type": "main", "index": 0}]] },
-    "Verify HMAC": { "main": [[{"node": "Log Notification", "type": "main", "index": 0}]] }
+    "Convex Signed Webhook": {
+      "main": [[{"node": "Verify HMAC and Replay", "type": "main", "index": 0}]]
+    },
+    "Verify HMAC and Replay": {
+      "main": [[{"node": "Log Notification", "type": "main", "index": 0}]]
+    },
+    "Borrow Workflow Error": {
+      "main": [[{"node": "Log Borrow Workflow Error", "type": "main", "index": 0}]]
+    }
   },
   "active": false,
-  "settings": { "executionOrder": "v1", "timezone": "UTC" },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  },
   "pinData": {},
   "tags": []
 }
