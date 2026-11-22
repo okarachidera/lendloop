@@ -67,6 +67,7 @@ export default defineSchema({
       v.literal("failed")
     ),
     attemptCount: v.number(),
+    attemptId: v.optional(v.string()),
     nextAttemptAt: v.optional(v.number()),
     lastAttemptAt: v.optional(v.number()),
     createdAt: v.number(),

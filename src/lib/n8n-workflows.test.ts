@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 function workflow(name: string) {
   return JSON.parse(
@@ -28,5 +29,19 @@ describe("exported n8n workflows", () => {
     expect(fetch.parameters.options.retry.maxTries).toBe(3);
     expect(write.parameters.jsonBody).toContain("attemptId");
     expect(reminderError.type).toBe("n8n-nodes-base.errorTrigger");
+  });
+
+  it("verifies a raw-body HMAC and rejects replayed timestamps or altered bodies", () => {
+    const secret = "local-test-secret";
+    const timestamp = "1730000000000";
+    const rawBody = '{"eventId":"evt-1","type":"request_created"}';
+    const valid = createHmac("sha256", secret)
+      .update(`${timestamp}.${rawBody}`)
+      .digest();
+    const altered = createHmac("sha256", secret)
+      .update(`${timestamp}.${rawBody.replace("evt-1", "evt-2")}`)
+      .digest();
+    expect(timingSafeEqual(valid, createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest())).toBe(true);
+    expect(timingSafeEqual(altered, valid)).toBe(false);
   });
 });

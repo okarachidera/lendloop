@@ -61,11 +61,13 @@ export const dispatchPendingEvents = actionGeneric({
         });
         await ctx.runMutation(internal.automation.recordEventResult, {
           eventId: event.eventId,
+          attemptId: claimed,
           success: response.ok,
         });
       } catch {
         await ctx.runMutation(internal.automation.recordEventResult, {
           eventId: event.eventId,
+          attemptId: claimed,
           success: false,
         });
       }
@@ -113,29 +115,33 @@ export const claimNotificationEvent = internalMutationGeneric({
     ) {
       return false;
     }
+    const attemptId = crypto.randomUUID();
     await ctx.db.patch(event._id, {
       status: "claimed",
+      attemptId,
       nextAttemptAt: now + 5 * 60 * 1000,
       lastAttemptAt: now,
     });
-    return true;
+    return attemptId;
   },
 });
 
 export const recordEventResult = internalMutationGeneric({
-  args: { eventId: v.string(), success: v.boolean() },
+  args: { eventId: v.string(), attemptId: v.string(), success: v.boolean() },
   handler: async (ctx, args) => {
     const event = await ctx.db
       .query("notificationEvents")
       .withIndex("by_event_id", (q: any) => q.eq("eventId", args.eventId))
       .unique();
     if (!event) return;
+    if (event.attemptId !== args.attemptId) return;
     if (event.status === "delivered" || event.status === "failed") return;
     const now = Date.now();
     if (args.success) {
       await ctx.db.patch(event._id, {
         status: "delivered",
         attemptCount: event.attemptCount + 1,
+        attemptId: undefined,
         lastAttemptAt: now,
       });
       return;
@@ -145,6 +151,7 @@ export const recordEventResult = internalMutationGeneric({
       await ctx.db.patch(event._id, {
         status: "failed",
         attemptCount,
+        attemptId: undefined,
         lastAttemptAt: now,
       });
       return;
@@ -156,6 +163,7 @@ export const recordEventResult = internalMutationGeneric({
     await ctx.db.patch(event._id, {
       status: "pending",
       attemptCount,
+      attemptId: undefined,
       nextAttemptAt: now + backoffMs,
       lastAttemptAt: now,
     });
