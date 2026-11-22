@@ -1,0 +1,51 @@
+{
+  "name": "LendLoop Borrow Request Notifications",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop-borrow-events",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "borrow-webhook",
+      "name": "Convex Signed Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "lendloop-borrow-events"
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const secret = $env.N8N_WEBHOOK_SECRET;\nconst timestamp = $headers['x-lendloop-timestamp'];\nconst eventId = $headers['x-lendloop-event-id'];\nconst signature = String($headers['x-lendloop-signature'] || '').replace('sha256=', '');\nconst crypto = require('crypto');\nconst rawBody = typeof $rawBody === 'string' ? $rawBody : JSON.stringify($json);\nif (!timestamp || !eventId || !secret) throw new Error('Missing signed webhook fields');\nif (Math.abs(Date.now() - Number(timestamp)) > 300000) throw new Error('Replay-protected timestamp rejected');\nconst expected = crypto.createHmac('sha256', secret).update(timestamp + '.' + rawBody).digest('hex');\nif (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) throw new Error('Invalid HMAC signature');\nreturn [{ json: $json }];"
+      },
+      "id": "verify-signature",
+      "name": "Verify HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const event = $json;\nconsole.log(`[LendLoop notification] ${event.type} for loan ${event.loanId}`);\nreturn [{ json: { eventId: event.eventId, delivered: true, recipientId: event.recipientId } }];"
+      },
+      "id": "mock-delivery",
+      "name": "Log Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 300]
+    }
+  ],
+  "connections": {
+    "Convex Signed Webhook": { "main": [[{"node": "Verify HMAC", "type": "main", "index": 0}]] },
+    "Verify HMAC": { "main": [[{"node": "Log Notification", "type": "main", "index": 0}]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "timezone": "UTC" },
+  "pinData": {},
+  "tags": []
+}
