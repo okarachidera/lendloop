@@ -1,0 +1,64 @@
+{
+  "name": "LendLoop Daily Overdue Reminders",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{"field": "hours", "hoursInterval": 24}] } },
+      "id": "daily-trigger",
+      "name": "Daily UTC Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CONVEX_HTTP_BASE_URL + '/n8n/overdue' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{"name": "Authorization", "value": "=Bearer {{ $env.LENDLOOP_N8N_SECRET }}"}] },
+        "options": {}
+      },
+      "id": "fetch-overdue",
+      "name": "Fetch Overdue Loans",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const reminders = $json.reminders || [];\nfor (const item of reminders) console.log(`[LendLoop reminder] Borrower ${item.borrowerId}: ${item.toolName} overdue since ${item.endDate}`);\nreturn reminders.map(item => ({ json: { ...item, success: true } }));"
+      },
+      "id": "send-reminders",
+      "name": "Send Mock Reminders",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONVEX_HTTP_BASE_URL + '/n8n/reminder-delivery' }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{"name": "Authorization", "value": "=Bearer {{ $env.LENDLOOP_N8N_SECRET }}"},{"name": "Content-Type", "value": "application/json"}] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ loanId: $json.loanId, period: $json.period, success: $json.success }) }}",
+        "options": {}
+      },
+      "id": "write-status",
+      "name": "Write Delivery Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1020, 300]
+    }
+  ],
+  "connections": {
+    "Daily UTC Schedule": { "main": [[{"node": "Fetch Overdue Loans", "type": "main", "index": 0}]] },
+    "Fetch Overdue Loans": { "main": [[{"node": "Send Mock Reminders", "type": "main", "index": 0}]] },
+    "Send Mock Reminders": { "main": [[{"node": "Write Delivery Status", "type": "main", "index": 0}]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "timezone": "UTC" },
+  "pinData": {},
+  "tags": []
+}
