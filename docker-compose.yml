@@ -11,6 +11,7 @@ services:
       - WEBHOOK_URL=http://localhost:5678/
       - GENERIC_TIMEZONE=UTC
       - TZ=UTC
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-change-this-local-encryption-key}
       - LENDLOOP_N8N_SECRET=${N8N_SHARED_SECRET:-replace-me}
       - CONVEX_HTTP_BASE_URL=${CONVEX_HTTP_BASE_URL:-http://host.docker.internal:3211}

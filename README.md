@@ -25,7 +25,7 @@ LendLoop is a neighborhood tool-lending application built with Next.js, Convex, 
 
 Browser interactions call Convex mutations through the Clerk-authenticated Convex client. Convex derives identity and role from the authenticated subject and never trusts a client-supplied user or role.
 
-Loan requests use `pending -> approved | declined -> returned` semantics. Cancellation is reserved for future borrower flows. Convex mutation transactions perform overlap checks and state updates together, preventing concurrent approvals from creating overlapping loans.
+Loan requests use `pending -> approved | declined -> returned` semantics, with `cancelled` for pending requests invalidated by listing deletion. Convex mutation transactions perform overlap checks and state updates together, preventing concurrent approvals from creating overlapping loans.
 
 Important collections:
 
@@ -89,6 +89,8 @@ export CONVEX_HTTP_BASE_URL='http://host.docker.internal:3211'
 docker compose up -d
 ```
 
+Docker Compose sets `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`, which is required for the exported workflows to read `CONVEX_HTTP_BASE_URL`, `LENDLOOP_N8N_SECRET`, and `N8N_WEBHOOK_SECRET` through `$env`. For production, prefer n8n variables/credentials and retain least-privilege secret access.
+
 Open `http://localhost:5678`, import both JSON files from `n8n/workflows/`, and set environment credentials:
 
 - `N8N_WEBHOOK_SECRET`: HMAC signing/verification secret.
@@ -139,7 +141,7 @@ See `docs/production-readiness.md` for the full short operational checklist.
 
 ## Known limitations
 
-- External Clerk, Convex, and n8n credentials are not configured in this workspace.
+- External Clerk, Convex, and n8n credentials were not configured in this workspace at acceptance-test time.
 - Admin assignment is intentionally not exposed to users.
 - Notifications are mock/log-only without an email or SMS provider.
 - Full Convex integration tests require a deployed test instance.
